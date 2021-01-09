@@ -9,14 +9,13 @@
     using System.Threading;
     using System.Threading.Tasks;
 
-    public class CacheObservable<T, K>
-       where K : notnull
+    public class CacheObservable<T, K> : ICacheObservable<T> where K : notnull
     {
         private ObservableCollection<List<DataTracker<T>>> cache;
         private Func<T, K> keySelector;
         private System.Timers.Timer timerAutoClean;
         private TimeSpan liveTime;
-         
+
 
         public CacheObservable(Func<T, K> keySelector)
         {
@@ -34,6 +33,16 @@
             }
         }
 
+        public int Count
+        {
+            get { return cache.Count; }
+        }
+
+        public void Clear()
+        {
+            cache.Clear();
+        }
+
         private void StartTimerAutoClean()
         {
             timerAutoClean ??= new System.Timers.Timer();
@@ -41,6 +50,7 @@
             timerAutoClean.Elapsed += TimerAutoClean_Elapsed;
             timerAutoClean.Interval = LiveTime.TotalMilliseconds / 10;
             timerAutoClean.Enabled = true;
+            timerAutoClean.AutoReset = true;
         }
 
         private void TimerAutoClean_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
@@ -100,7 +110,7 @@
             AddCache(items, DataTrackerChange.Add);
         }
 
-        public void Remove(T  item, bool force = false)
+        public void Remove(T item, bool force = false)
         {
             Remove(new[] { item }, force);
         }
@@ -110,8 +120,8 @@
             var removed = RemoveAll(items);
             if (force)
             {
-                AddCache(items, DataTrackerChange.Remove); 
-            } 
+                AddCache(items, DataTrackerChange.Remove);
+            }
             else if (removed.Any())
             {
                 AddCache(removed, DataTrackerChange.Remove);
