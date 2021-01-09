@@ -92,7 +92,7 @@ namespace DeltaX.CacheObservable.UnitTest
             var result = cache.WaitResultsAsunc(u => u.Action == DataTrackerChange.Remove);
 
             cache.Remove(new User { Id = 1 });
-            var hasResult = result.Wait(1);
+            var hasResult = result.Wait(5000);
 
             Assert.AreEqual(hasResult, true);
             Assert.AreEqual(result.Result.Count, 1);
