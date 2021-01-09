@@ -1,6 +1,7 @@
 ﻿namespace DeltaX.CacheObservable
 {
     using System;
+    using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Collections.ObjectModel;
     using System.Collections.Specialized;
@@ -15,6 +16,13 @@
         private Func<T, K> keySelector;
         private System.Timers.Timer timerAutoClean;
         private TimeSpan liveTime;
+         
+
+        public CacheObservable(Func<T, K> keySelector)
+        {
+            this.keySelector = keySelector;
+            this.cache = new ObservableCollection<List<DataTracker<T>>>();
+        }
 
         public TimeSpan LiveTime
         {
@@ -26,73 +34,109 @@
             }
         }
 
-        public CacheObservable(Func<T, K> keySelector)
-        {
-            this.keySelector = keySelector;
-            this.cache = new ObservableCollection<List<DataTracker<T>>>(); 
-        }
-
         private void StartTimerAutoClean()
         {
             timerAutoClean ??= new System.Timers.Timer();
             timerAutoClean.Elapsed -= TimerAutoClean_Elapsed;
             timerAutoClean.Elapsed += TimerAutoClean_Elapsed;
             timerAutoClean.Interval = LiveTime.TotalMilliseconds / 10;
-            timerAutoClean.Enabled = true; 
+            timerAutoClean.Enabled = true;
         }
 
         private void TimerAutoClean_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
             var since = DateTime.Now - LiveTime;
             RemoveAll(t => t.Updated < since);
-        } 
+        }
 
         protected void AddCache(IEnumerable<T> items, DataTrackerChange action = DataTrackerChange.Add)
         {
-            cache.Add(items.Select(item => new DataTracker<T>(item, action)).ToList());
+            lock (cache)
+            {
+                cache.Add(items.Select(item => new DataTracker<T>(item, action)).ToList());
+            }
         }
 
-        protected int RemoveAll(Predicate<DataTracker<T>> match)
+        protected IEnumerable<DataTracker<T>> RemoveAll(Func<DataTracker<T>, bool> match)
         {
-            var count = 0;
-            foreach (var itms in cache.ToList())
+            List<DataTracker<T>> removed = new List<DataTracker<T>>();
+            lock (cache)
             {
-                count += itms.RemoveAll(match);
-                if (!itms.Any())
+                foreach (var itms in cache.ToList())
                 {
-                    cache.Remove(itms);
+                    lock (itms)
+                    {
+                        var toRemove = itms.Where(match);
+                        if (toRemove.Any())
+                        {
+                            removed.AddRange(toRemove);
+                            itms.RemoveAll(e => match(e));
+                        }
+                        if (!itms.Any())
+                        {
+                            cache.Remove(itms);
+                        }
+                    }
                 }
             }
-            return count;
+            return removed;
         }
 
-        protected int RemoveAll(T item)
+        protected IEnumerable<T> RemoveAll(IEnumerable<T> items)
         {
-            return RemoveAll(i => keySelector(i.Entity)?.Equals(keySelector(item)) == true);
+            var toDelete = items.Select(item => keySelector(item)).ToArray();
+            return RemoveAll(i => toDelete.Contains(keySelector(i.Entity)))
+                .Select(r => r.Entity);
         }
 
         public void Add(T item)
         {
-            RemoveAll(item);
-            AddCache(new[] { item }, DataTrackerChange.Add);
+            Add(new[] { item });
         }
 
-        public void Remove(T item, bool force = false)
+        public void Add(IEnumerable<T> items)
         {
-            var count = RemoveAll(item);
-            if (count > 0 || force)
-            {
-                AddCache(new[] { item }, DataTrackerChange.Remove);
-            }
+            RemoveAll(items);
+            AddCache(items, DataTrackerChange.Add);
         }
 
-        public void Replace(T item, bool force = false)
+        public void Remove(T  item, bool force = false)
         {
-            var count = RemoveAll(item);
-            if (count > 0 || force)
+            Remove(new[] { item }, force);
+        }
+
+        public IEnumerable<T> Remove(IEnumerable<T> items, bool force = false)
+        {
+            var removed = RemoveAll(items);
+            if (force)
             {
-                AddCache(new[] { item }, DataTrackerChange.Replace);
+                AddCache(items, DataTrackerChange.Remove); 
+            } 
+            else if (removed.Any())
+            {
+                AddCache(removed, DataTrackerChange.Remove);
             }
+            return removed;
+        }
+
+        public void Update(T item, bool force = false)
+        {
+            Update(new[] { item }, force);
+        }
+
+        public IEnumerable<T> Update(IEnumerable<T> items, bool force = false)
+        {
+            var removed = RemoveAll(items);
+            if (force)
+            {
+                AddCache(items, DataTrackerChange.Update);
+            }
+            else if (removed.Any())
+            {
+                var keysRemoved = removed.Select(item => keySelector(item)).ToArray();
+                AddCache(items.Where(item => keysRemoved.Contains(keySelector(item))), DataTrackerChange.Update);
+            }
+            return removed;
         }
 
         public Task<List<DataTracker<T>>> WaitResultsAsunc(
@@ -105,7 +149,11 @@
             return Task.Run(() =>
             {
                 var resetEvent = new ManualResetEventSlim();
-                var results = cache.SelectMany(e => e.Where(filter)).ToList();
+                List<DataTracker<T>> results;
+                lock (cache)
+                {
+                    results = cache.SelectMany(e => e.Where(filter)).ToList();
+                }
                 results ??= new List<DataTracker<T>>();
 
                 if (results.Any())
@@ -117,12 +165,12 @@
                 {
                     if (e.Action == NotifyCollectionChangedAction.Add)
                     {
-                        foreach (List<DataTracker<T>> items in e.NewItems)
+                        foreach (List<DataTracker<T>> itms in e.NewItems)
                         {
-                            if (items.Any(filter))
-                            {
-                                results.AddRange(items.Where(filter));
-                            }
+                            lock (itms) if (itms.Any(filter))
+                                {
+                                    results.AddRange(itms.Where(filter));
+                                }
                         }
 
                         if (results.Any())
