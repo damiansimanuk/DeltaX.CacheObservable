@@ -2,6 +2,14 @@
 
   <PropertyGroup>
     <TargetFramework>netcoreapp3.1</TargetFramework>
+    <Authors>DeltaX</Authors>
+    <Company>DeltaXDeltaX</Company>
+    <Description>Simple cache for tracker change and lambda expression match</Description>
+    <RepositoryUrl>https://github.com/damiansimanuk/DeltaX.CacheObservable</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/damiansimanuk/DeltaX.CacheObservable</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <AssemblyVersion>1.0.0.1</AssemblyVersion>
+    <FileVersion>1.0.0.1</FileVersion>
   </PropertyGroup>
 
 </Project>
